@@ -1,0 +1,102 @@
+name: Build and Deploy to Staging Website
+
+on:
+  workflow_dispatch
+# otherwise auto on update of main
+#  push:
+#    branches: [ "main" ]
+
+env:
+  REPOSITORY: perfect-landlord # TODO: update to Artifact Registry docker repository
+  IMAGE: perfect-landlord
+  
+jobs:
+     
+  setup-build-publish:
+    name: Setup, Build, Publish
+    runs-on: ubuntu-latest
+    environment: production
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: [3.11]
+
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Check version of file
+      run: |
+        cat frontend/src/router/index.js
+      
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Docker configuration
+      uses: docker/login-action@v2
+      with:
+        username: colonel13
+        password: dckr_pat_dhqpA6eqNlNAmGTqyxtfR-Cplqg
+   
+    - name: Build React Website
+      run: |
+        cd frontend
+        npm install
+        npm run build
+        cd ..
+        
+    - name: Build Django Static files
+      run: |
+        cd backend
+        pip install --upgrade pip
+        pip install -r requirements.txt 
+        python3 manage.py check
+        python3 manage.py test
+        python3 manage.py collectstatic --noinput
+        cd ..
+
+    - name: Collect website and django static into nginx container build
+      run: |
+        cp -r frontend/dist/* nginx/html/.
+        mkdir -p nginx/html/static
+        cp -r backend/static/* nginx/html/static/.
+
+    - name: Build docker images
+      run: |
+        docker compose -f docker-compose-production.yml build --progress plain
+
+    - name: Push docker images
+      run: |
+        docker compose -f docker-compose-production.yml push -q
+
+#  build:
+#    runs-on: ubuntu-latest
+#    steps:
+    - name: Install into staging server
+      uses: appleboy/ssh-action@master
+      env:
+        IN_PRODUCTION: "True"
+      with:
+        host: 203.16.241.202
+        username: root
+        key: ${{ secrets.STAGE_SECRET }}
+        port: 22
+        script_stop: true
+        script: |
+          mkdir -p /opt/perfectlandlord/persistent
+          mkdir -p /opt/perfectlandlord/postgresql/data
+          mkdir -p /opt/perfectlandlord_docker
+          cd /opt/perfectlandlord_docker
+          docker compose down
+          docker compose pull -q
+          docker compose run backend python3 manage.py migrate
+          docker compose up -d
+          docker system prune -a
+          
+          
