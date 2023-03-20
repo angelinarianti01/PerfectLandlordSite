@@ -1,7 +1,7 @@
 name: Build and Deploy to Staging Website
 
 on:
-  workflow_dispatch
+  workflow_dispatch: {}
 # otherwise auto on update of main
 #  push:
 #    branches: [ "main" ]
